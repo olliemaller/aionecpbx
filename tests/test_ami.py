@@ -107,10 +107,15 @@ async def test_call_lifecycle_and_dnd(fake: FakeAmi) -> None:
 
 
 async def test_wrong_secret_stops_trying(fake: FakeAmi) -> None:
-    client = AmiClient("127.0.0.1", fake.port, "ha", "wrong", lambda _c, _w: None)
+    failures: list[str] = []
+    client = AmiClient(
+        "127.0.0.1", fake.port, "ha", "wrong", lambda _c, _w: None, None, failures.append
+    )
     client.start()
     await wait_for(lambda: client.last_error is not None)
     assert client.last_error.startswith("login:")
+    assert client.auth_failed
+    assert failures == ["Authentication failed"]
     await wait_for(lambda: client._task is not None and client._task.done())
     await client.stop()
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- `AmiClient` takes an `on_auth_failed` callback, called once with FreePBX's
+  message when the login is rejected, and has an `auth_failed` property. The
+  client still stops trying after a rejected login, so it can't lock the
+  manager user out.
+
 ## 0.1.0
 
 First release, moved out of the [NEC PBX integration for Home Assistant](https://github.com/olliemaller/ha-nec-pbx) so it can be used on its own.

@@ -78,6 +78,7 @@ class AmiClient:
         secret: str,
         on_change: Callable[[LiveCall, str], None],
         on_state: Callable[[bool], None] | None = None,
+        on_auth_failed: Callable[[str], None] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -85,6 +86,7 @@ class AmiClient:
         self._secret = secret
         self._on_change = on_change
         self._on_state = on_state
+        self._on_auth_failed = on_auth_failed
         self.calls: dict[str, LiveCall] = {}
         self.connected = False
         self.last_error: str | None = None
@@ -156,6 +158,8 @@ class AmiClient:
                 self.last_error = f"login: {err}"
                 self._auth_failed = True  # don't hammer FreePBX with a wrong password
                 _LOGGER.error("Asterisk manager login rejected: %s", err)
+                if self._on_auth_failed:
+                    self._on_auth_failed(str(err))
             except (OSError, TimeoutError, ConnectionError, asyncio.IncompleteReadError) as err:
                 self.last_error = f"connect: {err}"
                 _LOGGER.debug("AMI %s:%s: %s", self.host, self.port, err)
@@ -262,6 +266,11 @@ class AmiClient:
             self._on_change(call, LIVE_ENDED)
 
     # ── state for entities ─────────────────────────────────────────────────
+
+    @property
+    def auth_failed(self) -> bool:
+        """True once FreePBX rejected the login; the client then stops trying."""
+        return self._auth_failed
 
     @property
     def ringing(self) -> list[LiveCall]:
