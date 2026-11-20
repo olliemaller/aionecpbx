@@ -30,16 +30,21 @@ Only one program can hold the SMDR port at a time.
 import asyncio
 from aionecpbx import SmdrClient, parse_line
 
+
 def on_line(line: str) -> None:
     record = parse_line(line, extensions={"103": "Kitchen"}, phonebook={"0491570156": "Alex"})
     if record:
-        print(record.direction, record.station_name, record.number, record.caller_name, record.missed)
+        print(
+            record.direction, record.station_name, record.number, record.caller_name, record.missed
+        )
+
 
 async def main() -> None:
     client = SmdrClient("192.168.0.10", 4001, on_line)
     client.start()
     await asyncio.sleep(3600)
     await client.stop()
+
 
 asyncio.run(main())
 ```
@@ -53,8 +58,10 @@ In FreePBX, **Settings > Asterisk Manager Users > Add Manager**: permit your add
 ```python
 from aionecpbx import AmiClient, LiveCall
 
+
 def on_change(call: LiveCall, what: str) -> None:
     print(what, call.caller_number, call.caller_name, call.extension)  # ringing / answered / ended
+
 
 client = AmiClient("192.168.0.20", 5038, "homeassistant", "secret", on_change)
 client.start()
