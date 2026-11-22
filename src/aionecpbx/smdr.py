@@ -54,6 +54,11 @@ DATE_MDY = "mdy"
 DATE_ORDERS = (DATE_AUTO, DATE_DMY, DATE_MDY)
 
 _MISSED_FLAGS = ("NO ANSWER", "NOANSWER", "ABANDON", "UNANSWERED", "LOST")
+# Whole words only: a caller ID name such as "BLOSTON" must not mark a call as missed.
+_RE_MISSED = {
+    flag: re.compile(rf"(?<![A-Za-z]){re.escape(flag)}(?![A-Za-z])", re.IGNORECASE)
+    for flag in _MISSED_FLAGS
+}
 
 _HEADER_WORDS = ("CLSS", "STATION", "DURATION", "DIALLED", "DIALED")
 _SUMMARY_WORDS = ("TOTAL", "SUMMARY", "DAILY", "WEEKLY", "MONTHLY", "PAGE")
@@ -151,12 +156,11 @@ def parse_line(
     rec = SmdrRecord(raw=raw)
     work = raw
 
-    upper = work.upper()
-    for flag in _MISSED_FLAGS:
-        if flag in upper:
+    for flag, pattern in _RE_MISSED.items():
+        if pattern.search(work):
             rec.flags.append(flag.replace(" ", "_").lower())
             rec.answered = False
-            work = re.sub(re.escape(flag), " ", work, flags=re.IGNORECASE)
+            work = pattern.sub(" ", work)
 
     cost = _RE_COST.search(work)
     if cost:

@@ -81,6 +81,16 @@ def test_incoming_no_answer_is_missed() -> None:
     assert rec.start == datetime(2026, 4, 22, 8, 29)
 
 
+def test_missed_word_inside_a_name_is_not_a_flag() -> None:
+    # "BLOSTON" contains LOST and "ABANDONATO" contains ABANDON: answered calls all the same.
+    for name in ("BLOSTON", "ABANDONATO"):
+        line = f"29 {name}  08:29 22/04 017                      226xxxxx         0:19"
+        rec = parse_line(line, now=NOW)
+        assert rec is not None
+        assert rec.answered, name
+        assert rec.flags == [], name
+
+
 def test_date_column_and_masked_number() -> None:
     line = "28 PIN   08:28 22/04 003  00:00:04 5500       2261234X         0:25"
     rec = parse_line(line, now=NOW)

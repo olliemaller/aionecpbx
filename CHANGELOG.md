@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed: a call was marked missed when a name on the line contained one of the
+  missed-call words, such as the caller ID name "BLOSTON" (LOST). They now count
+  only as whole words.
+
 ## 0.2.0
 
 - `AmiClient` takes an `on_auth_failed` callback, called once with FreePBX's
