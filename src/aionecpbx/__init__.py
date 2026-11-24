@@ -39,7 +39,7 @@ from .smdr import (
     parse_mapping,
 )
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 __all__ = [
     "DATE_AUTO",

@@ -85,6 +85,12 @@ client.start()
 await client.set_dnd("103", True)
 ```
 
+To hear when do-not-disturb changes anywhere else, such as *76 on a phone, pass `on_dnd`. FreePBX reports it through its `Custom:DND<ext>` hint, so its do-not-disturb hints must be on (they are by default):
+
+```python
+client = AmiClient(..., on_change, on_dnd=lambda extension, on: print(extension, on))
+```
+
 A rejected login stops the client rather than retrying, so it can't lock the manager user out. To hear about it, pass `on_auth_failed`, which is called once with FreePBX's message, for example to ask the user for a new secret. The `auth_failed` property stays true until you make a new client:
 
 ```python

@@ -81,6 +81,7 @@ class AmiClient:
         on_change: Callable[[LiveCall, str], None],
         on_state: Callable[[bool], None] | None = None,
         on_auth_failed: Callable[[str], None] | None = None,
+        on_dnd: Callable[[str, bool], None] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -89,6 +90,7 @@ class AmiClient:
         self._on_change = on_change
         self._on_state = on_state
         self._on_auth_failed = on_auth_failed
+        self._on_dnd = on_dnd
         self.calls: dict[str, LiveCall] = {}
         self.connected = False
         self.last_error: str | None = None
@@ -234,6 +236,9 @@ class AmiClient:
             if future and not future.done():
                 future.set_result(msg)
             return
+        if event == "DeviceStateChange":
+            self._dnd_event(msg)
+            return
         if event:
             try:
                 self._call_event(event, msg)
@@ -280,6 +285,17 @@ class AmiClient:
             self._cancel_expiry(uid)
             call.state = LIVE_ENDED
             self._on_change(call, LIVE_ENDED)
+
+    def _dnd_event(self, msg: dict[str, str]) -> None:
+        """FreePBX sets the hint ``Custom:DND<ext>`` to BUSY (on) or NOT_INUSE (off)
+        whenever do-not-disturb changes, from a phone (*76), the GUI or UCP."""
+        device = msg.get("Device", "")
+        for prefix in ("Custom:DND", "DND/"):
+            if device.startswith(prefix) and len(device) > len(prefix):
+                state = msg.get("State", "").upper()
+                if self._on_dnd and state in ("BUSY", "INUSE", "NOT_INUSE"):
+                    self._notify(self._on_dnd, device[len(prefix) :], state != "NOT_INUSE")
+                return
 
     def _cancel_expiry(self, uid: str) -> None:
         if handle := self._expiry.pop(uid, None):
