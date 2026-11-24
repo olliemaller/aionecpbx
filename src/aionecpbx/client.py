@@ -15,6 +15,9 @@ DEFAULT_SMDR_PORT = 4001
 #: Seconds between reconnect attempts: doubles from the minimum to the maximum.
 RECONNECT_MIN = 5
 RECONNECT_MAX = 300
+#: A connection counts as healthy, and the back-off starts again from the
+#: minimum, once a line arrives or it has stayed up this many seconds.
+STABLE_AFTER = 60
 CONNECT_TIMEOUT = 10
 #: TCP keepalive, so a phone system that vanished is noticed within about
 #: 90 seconds (idle, then interval x count).
@@ -117,29 +120,45 @@ class SmdrClient:
         delay = RECONNECT_MIN
         while True:
             try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(self.host, self.port), CONNECT_TIMEOUT
+                if await self._connect_once():
+                    delay = RECONNECT_MIN
+            except Exception as err:  # a failing callback must not end the loop silently
+                self.last_error = f"error: {err!r}"
+                _LOGGER.exception(
+                    "SMDR client for %s:%s failed; reconnecting", self.host, self.port
                 )
-                self._writer = writer
-            except (OSError, TimeoutError) as err:
-                self.last_error = f"connect: {err}"
-                _LOGGER.debug("SMDR connect to %s:%s failed: %s", self.host, self.port, err)
-            else:
-                _enable_keepalive(writer)
-                _LOGGER.info("Connected to SMDR at %s:%s", self.host, self.port)
-                self.last_error = None
-                self._set_connected(True)
-                delay = RECONNECT_MIN
-                try:
-                    await self._read(reader)
-                except (OSError, asyncio.IncompleteReadError) as err:
-                    self.last_error = f"read: {err}"
-                    _LOGGER.warning("SMDR connection to %s lost: %s", self.host, err)
-                finally:
-                    await self._close()
-                    self._set_connected(False)
+                await self._close()
             await asyncio.sleep(delay)
             delay = min(delay * 2, RECONNECT_MAX)
+
+    async def _connect_once(self) -> bool:
+        """Connect and read until the link drops. True if the link was healthy:
+        a line arrived or it stayed up for ``STABLE_AFTER`` seconds. A phone
+        system that accepts and closes straight away keeps the back-off growing."""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), CONNECT_TIMEOUT
+            )
+            self._writer = writer
+        except (OSError, TimeoutError) as err:
+            self.last_error = f"connect: {err}"
+            _LOGGER.debug("SMDR connect to %s:%s failed: %s", self.host, self.port, err)
+            return False
+        loop = asyncio.get_running_loop()
+        started, lines_before = loop.time(), self.lines_received
+        _enable_keepalive(writer)
+        _LOGGER.info("Connected to SMDR at %s:%s", self.host, self.port)
+        self.last_error = None
+        try:
+            self._set_connected(True)
+            await self._read(reader)
+        except (OSError, asyncio.IncompleteReadError) as err:
+            self.last_error = f"read: {err}"
+            _LOGGER.warning("SMDR connection to %s lost: %s", self.host, err)
+        finally:
+            await self._close()
+            self._set_connected(False)
+        return self.lines_received > lines_before or loop.time() - started >= STABLE_AFTER
 
     async def _read(self, reader: asyncio.StreamReader) -> None:
         buffer = b""
@@ -168,4 +187,5 @@ class SmdrClient:
             if asyncio.iscoroutine(result):
                 await result
         except Exception:
-            _LOGGER.exception("Error handling SMDR line %r", line)
+            # The line itself can hold phone numbers; it is only logged at debug level.
+            _LOGGER.exception("Error handling an SMDR line (%d characters)", len(line))

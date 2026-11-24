@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -143,3 +144,60 @@ async def test_test_login(fake: FakeAmi) -> None:
         await async_test_login("127.0.0.1", fake.port, "ha", "nope")
     with pytest.raises(OSError):
         await async_test_login("127.0.0.1", 1, "ha", "s3cret")
+
+
+async def test_line_over_64_kib_reconnects(fake: FakeAmi, caplog: pytest.LogCaptureFixture) -> None:
+    """asyncio's readline raises ValueError on a very long line; the client
+    logs it and reconnects instead of stopping for good."""
+    states: list[bool] = []
+    client = AmiClient("127.0.0.1", fake.port, "ha", "s3cret", lambda _c, _w: None, states.append)
+    client.start()
+    await wait_for(lambda: client.connected)
+    await fake.event(Event="Newchannel", Uniqueid="1", Junk="x" * 70_000)
+    await wait_for(lambda: states[:3] == [True, False, True])
+    assert "failed; reconnecting" in caplog.text
+    await client.stop()
+
+
+async def test_failing_callbacks_do_not_stop_the_client(fake: FakeAmi) -> None:
+    states: list[bool] = []
+
+    def on_state(value: bool) -> None:
+        states.append(value)
+        raise RuntimeError("broken")
+
+    def on_change(_call: LiveCall, _what: str) -> None:
+        raise RuntimeError("broken")
+
+    client = AmiClient("127.0.0.1", fake.port, "ha", "s3cret", on_change, on_state)
+    client.start()
+    await wait_for(lambda: client.connected)
+    await fake.event(Event="Newchannel", Uniqueid="1", ChannelStateDesc="Ring")
+    await wait_for(lambda: len(client.ringing) == 1)
+    await fake.drop()  # ends every call, calling the broken callbacks again
+    await wait_for(lambda: states[:3] == [True, False, True])
+    assert not client.calls
+    await client.stop()
+
+
+async def test_ringing_call_expires_when_its_hangup_is_missed(
+    fake: FakeAmi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ami_module, "RINGING_MAX_AGE", 0.1)
+    changes: list[str] = []
+    client = AmiClient(
+        "127.0.0.1", fake.port, "ha", "s3cret", lambda _c, what: changes.append(what)
+    )
+    client.start()
+    await wait_for(lambda: client.connected)
+    await fake.event(Event="Newchannel", Uniqueid="1", ChannelStateDesc="Ring")
+    await wait_for(lambda: len(client.ringing) == 1)
+    await wait_for(lambda: not client.calls)
+    assert changes == [LIVE_RINGING, LIVE_ENDED]
+    # An answered call is left alone.
+    await fake.event(Event="Newchannel", Uniqueid="2", ChannelStateDesc="Ring")
+    await fake.event(Event="DialEnd", Uniqueid="2", DialStatus="ANSWER")
+    await wait_for(lambda: len(client.active) == 1)
+    await asyncio.sleep(0.2)
+    assert len(client.active) == 1
+    await client.stop()

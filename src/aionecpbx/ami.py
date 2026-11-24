@@ -28,6 +28,8 @@ DEFAULT_AMI_PORT = 5038
 _RECONNECT_MIN = 5
 _RECONNECT_MAX = 300
 _TIMEOUT = 10
+#: A call still ringing after this many seconds is dropped: its Hangup was missed.
+RINGING_MAX_AGE = 600
 
 LIVE_RINGING = "ringing"
 LIVE_ANSWERED = "answered"
@@ -95,6 +97,7 @@ class AmiClient:
         self._ids = itertools.count(1)
         self._pending: dict[str, asyncio.Future[dict[str, str]]] = {}
         self._auth_failed = False
+        self._expiry: dict[str, asyncio.TimerHandle] = {}
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -117,7 +120,15 @@ class AmiClient:
         if value != self.connected:
             self.connected = value
             if self._on_state:
-                self._on_state(value)
+                self._notify(self._on_state, value)
+
+    @staticmethod
+    def _notify(callback: Callable[..., None], *args: object) -> None:
+        """Call back, logging rather than raising, so the read loop carries on."""
+        try:
+            callback(*args)
+        except Exception:
+            _LOGGER.exception("Error in an Asterisk manager callback")
 
     async def _close(self) -> None:
         writer, self._writer = self._writer, None
@@ -159,10 +170,15 @@ class AmiClient:
                 self._auth_failed = True  # don't hammer FreePBX with a wrong password
                 _LOGGER.error("Asterisk manager login rejected: %s", err)
                 if self._on_auth_failed:
-                    self._on_auth_failed(str(err))
+                    self._notify(self._on_auth_failed, str(err))
             except (OSError, TimeoutError, ConnectionError, asyncio.IncompleteReadError) as err:
                 self.last_error = f"connect: {err}"
                 _LOGGER.debug("AMI %s:%s: %s", self.host, self.port, err)
+            except Exception as err:  # e.g. ValueError for a line over 64 KiB, or a callback
+                self.last_error = f"error: {err!r}"
+                _LOGGER.exception(
+                    "Asterisk manager client for %s:%s failed; reconnecting", self.host, self.port
+                )
             finally:
                 await self._close()
                 self._set_connected(False)
@@ -234,6 +250,9 @@ class AmiClient:
                 if event == "Newchannel" and msg.get("ChannelStateDesc") not in ("Ring", "Ringing"):
                     return  # an outgoing leg or a local channel, not a call coming in
                 call = self.calls[uid] = LiveCall(uid)
+                self._expiry[uid] = asyncio.get_running_loop().call_later(
+                    RINGING_MAX_AGE, self._expire, uid
+                )
             call.caller_number = call.caller_number or _clean(msg.get("CallerIDNum"))
             call.caller_name = call.caller_name or _clean(msg.get("CallerIDName"))
             if event == "DialBegin":
@@ -248,22 +267,41 @@ class AmiClient:
                 and msg.get("Uniqueid") != uid
             ):
                 call.state, call.answered = LIVE_ANSWERED, time.time()
+                self._cancel_expiry(uid)
                 self._on_change(call, LIVE_ANSWERED)
         elif event == "DialEnd" and call is not None:
             if msg.get("DialStatus") == "ANSWER" and call.state != LIVE_ANSWERED:
                 call.state, call.answered = LIVE_ANSWERED, time.time()
                 call.extension = _clean(msg.get("DestCallerIDNum")) or call.extension
+                self._cancel_expiry(uid)
                 self._on_change(call, LIVE_ANSWERED)
         elif event == "Hangup" and call is not None and msg.get("Uniqueid") == uid:
             del self.calls[uid]
+            self._cancel_expiry(uid)
             call.state = LIVE_ENDED
             self._on_change(call, LIVE_ENDED)
 
+    def _cancel_expiry(self, uid: str) -> None:
+        if handle := self._expiry.pop(uid, None):
+            handle.cancel()
+
+    def _expire(self, uid: str) -> None:
+        """End a call still ringing after ``RINGING_MAX_AGE``: its Hangup was missed."""
+        self._expiry.pop(uid, None)
+        call = self.calls.get(uid)
+        if call is not None and call.state == LIVE_RINGING:
+            del self.calls[uid]
+            call.state = LIVE_ENDED
+            _LOGGER.debug("Call %s rang for over %s s; treating it as ended", uid, RINGING_MAX_AGE)
+            self._notify(self._on_change, call, LIVE_ENDED)
+
     def _end_all(self) -> None:
+        for uid in list(self._expiry):
+            self._cancel_expiry(uid)
         for uid in list(self.calls):
             call = self.calls.pop(uid)
             call.state = LIVE_ENDED
-            self._on_change(call, LIVE_ENDED)
+            self._notify(self._on_change, call, LIVE_ENDED)
 
     # ── state for entities ─────────────────────────────────────────────────
 

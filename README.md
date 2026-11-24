@@ -1,5 +1,9 @@
 # aionecpbx
 
+[![PyPI](https://img.shields.io/pypi/v/aionecpbx?style=for-the-badge&color=FFFFFF&labelColor=000000)](https://pypi.org/project/aionecpbx/)
+[![Checks](https://img.shields.io/github/actions/workflow/status/olliemaller/aionecpbx/ci.yml?branch=main&style=for-the-badge&label=checks&labelColor=000000)](https://github.com/olliemaller/aionecpbx/actions/workflows/ci.yml)
+[![Licence](https://img.shields.io/github/license/olliemaller/aionecpbx?style=for-the-badge&color=FFFFFF&labelColor=000000)](https://github.com/olliemaller/aionecpbx/blob/main/LICENSE)
+
 Async Python clients for **NEC SL2100 and SV9100** phone systems, and for live calls through **FreePBX**.
 
 - **`SmdrClient`** keeps a connection to the phone system's SMDR (call log) port open, reconnects by itself, and hands over each line.
@@ -51,6 +55,18 @@ asyncio.run(main())
 
 A record is only written when a call **ends**. For calls as they ring, use FreePBX below.
 
+`SmdrClient` reconnects by itself, waiting 5 seconds at first and doubling up to 5 minutes. The wait starts again from 5 seconds once a line arrives or the connection has stayed up for a minute, so a phone system that accepts and drops the connection straight away isn't hammered. `on_state(connected)` is called when the connection comes and goes, and `last_error` says why it last dropped.
+
+To check an address and port before you start the client, for example in a setup form:
+
+```python
+from aionecpbx import async_probe
+
+await async_probe("192.168.0.10", 4001)  # raises OSError or TimeoutError if it can't connect
+```
+
+`async_probe` opens a connection and closes it again. The phone system only lets one program hold the SMDR port, so don't probe while your own client is connected: the probe either fails or takes the port for a moment.
+
 ## Live calls (FreePBX)
 
 In FreePBX, **Settings > Asterisk Manager Users > Add Manager**: permit your address, and give it at least read `call` and `system`, and write `system` for do-not-disturb.
@@ -69,7 +85,24 @@ client.start()
 await client.set_dnd("103", True)
 ```
 
-A rejected login stops the client rather than retrying, so it can't lock the manager user out. `async_test_login()` checks a login once.
+A rejected login stops the client rather than retrying, so it can't lock the manager user out. To hear about it, pass `on_auth_failed`, which is called once with FreePBX's message, for example to ask the user for a new secret. The `auth_failed` property stays true until you make a new client:
+
+```python
+def on_auth_failed(message: str) -> None:
+    print("FreePBX rejected the login:", message)
+
+
+client = AmiClient(
+    "192.168.0.20",
+    5038,
+    "homeassistant",
+    "secret",
+    on_change,
+    on_auth_failed=on_auth_failed,
+)
+```
+
+`async_test_login()` checks a login once. A call still ringing after 10 minutes (`RINGING_MAX_AGE`) is treated as ended, in case FreePBX's Hangup event was missed.
 
 ## Command line
 

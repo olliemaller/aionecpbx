@@ -246,3 +246,11 @@ def test_keepalive_is_enabled() -> None:
     writer.get_extra_info.return_value = sock
     _enable_keepalive(writer)
     sock.setsockopt.assert_any_call(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+
+def test_number_is_removed_at_its_own_place_only() -> None:
+    """The same digits inside another token (an account code) stay put."""
+    record = parse_line("OG 0001 10:00 00:01:00 ACC10345 10345")
+    assert record is not None
+    assert record.number == "10345"
+    assert record.station is None  # the number is not read again as an extension

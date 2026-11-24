@@ -68,7 +68,7 @@ _RE_TIME = re.compile(r"(?<![\d:/])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 _RE_DATE = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])")
 _RE_RING = re.compile(r"(?<![\d:])(\d{1,3}):([0-5]\d)(?![\d:])")
 _RE_COST = re.compile(r"\$\s?[\d,]+(?:\.\d+)?")
-# External numbers: 6+ digits, possibly ending in X where digits were hidden.
+# External numbers: 5+ digits, possibly ending in X where digits were hidden.
 _RE_NUMBER = re.compile(r"(?<![\w:/])\+?\d[\d*#]{4,}[\dX]*(?![\w:/])")
 _RE_SHORT = re.compile(r"(?<![\w:/$,.])(\d{2,5})(?![\w:/,.])")
 
@@ -208,10 +208,10 @@ def parse_line(
         work = work[: ring.start()] + " " + work[ring.end() :]
 
     # External number: the longest long digit string.
-    numbers = sorted(_RE_NUMBER.findall(work), key=len, reverse=True)
+    numbers = sorted(_RE_NUMBER.finditer(work), key=lambda m: len(m.group(0)), reverse=True)
     if numbers:
-        rec.number = numbers[0]
-        work = work.replace(numbers[0], " ", 1)
+        rec.number = numbers[0].group(0)
+        work = work[: numbers[0].start()] + " " + work[numbers[0].end() :]
 
     # Station: a known extension number or name wins; otherwise the first
     # short number that is not the trunk.
