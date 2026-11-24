@@ -107,6 +107,30 @@ async def test_call_lifecycle_and_dnd(fake: FakeAmi) -> None:
         await client.action("Ping")
 
 
+async def test_dnd_events(fake: FakeAmi) -> None:
+    seen: list[tuple[str, bool]] = []
+    client = AmiClient(
+        "127.0.0.1",
+        fake.port,
+        "ha",
+        "s3cret",
+        lambda _c, _w: None,
+        on_dnd=lambda e, on: seen.append((e, on)),
+    )
+    client.start()
+    await wait_for(lambda: client.connected)
+    await fake.event(Event="DeviceStateChange", Device="Custom:DND901", State="BUSY")
+    await fake.event(Event="DeviceStateChange", Device="Custom:DND901", State="UNKNOWN")
+    await fake.event(Event="DeviceStateChange", Device="DND/902", State="INUSE")
+    await fake.event(
+        Event="DeviceStateChange", Device="PJSIP/901", State="BUSY"
+    )  # a phone, not DND
+    await fake.event(Event="DeviceStateChange", Device="Custom:DND901", State="NOT_INUSE")
+    await wait_for(lambda: len(seen) == 3)
+    assert seen == [("901", True), ("902", True), ("901", False)]
+    await client.stop()
+
+
 async def test_wrong_secret_stops_trying(fake: FakeAmi) -> None:
     failures: list[str] = []
     client = AmiClient(

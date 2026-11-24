@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- New `on_dnd(extension, on)` callback on `AmiClient`. FreePBX sets the hint
+  `Custom:DND<ext>` whenever do-not-disturb changes (from a phone with *76, the
+  GUI or UCP), and Asterisk reports it as a `DeviceStateChange` event, so the
+  caller hears about it straight away instead of having to poll `get_dnd`.
+  This needs FreePBX's do-not-disturb hints on (Advanced Settings, on by
+  default). `DND/<ext>` devices are read the same way.
+
 ## 0.2.2
 
 Released 24 November 2026. Reliability and privacy fixes.
