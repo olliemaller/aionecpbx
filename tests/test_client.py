@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 import logging
 
@@ -65,7 +66,7 @@ async def test_async_callback_and_errors(pbx: FakePbx, caplog: pytest.LogCapture
     with caplog.at_level(logging.ERROR):
         await pbx.send("BAD line\nGOOD line\n")
         await wait_for(lambda: seen == ["GOOD line"])
-    assert "Error handling SMDR line" in caplog.text
+    assert "Error handling an SMDR line" in caplog.text
     await client.stop()
 
 
@@ -93,3 +94,63 @@ async def test_probe(pbx: FakePbx) -> None:
     await async_probe("127.0.0.1", pbx.port)
     with pytest.raises(OSError):
         await async_probe("127.0.0.1", 1)
+
+
+async def test_back_off_grows_when_the_pbx_accepts_then_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A phone system that takes the connection and drops it straight away
+    must not be hammered: the delay only resets after a healthy connection."""
+    monkeypatch.setattr(client_module, "RECONNECT_MIN", 0.02)
+    monkeypatch.setattr(client_module, "RECONNECT_MAX", 10)
+    connections = 0
+
+    async def accept_and_close(_r: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal connections
+        connections += 1
+        writer.close()
+
+    server = await asyncio.start_server(accept_and_close, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = SmdrClient("127.0.0.1", port, lambda _line: None)
+    client.start()
+    await asyncio.sleep(0.7)
+    await client.stop()
+    server.close()
+    # Back-off: 0.02, 0.04, 0.08, 0.16, 0.32 s allows about 5 or 6 tries in
+    # 0.7 s. Without it there would be about 35.
+    assert 2 <= connections <= 8
+
+
+async def test_failing_state_callback_does_not_stop_the_client(
+    pbx: FakePbx, caplog: pytest.LogCaptureFixture
+) -> None:
+    states: list[bool] = []
+
+    def on_state(value: bool) -> None:
+        states.append(value)
+        raise RuntimeError("broken callback")
+
+    client = SmdrClient("127.0.0.1", pbx.port, lambda _line: None, on_state)
+    client.start()
+    await wait_for(lambda: len(states) >= 3)  # up, down, up again
+    assert "failed; reconnecting" in caplog.text
+    assert client._task is not None
+    assert not client._task.done()
+    await client.stop()
+
+
+async def test_failing_line_callback_does_not_log_the_line(
+    pbx: FakePbx, caplog: pytest.LogCaptureFixture
+) -> None:
+    def on_line(_line: str) -> None:
+        raise ValueError("boom")
+
+    client = SmdrClient("127.0.0.1", pbx.port, on_line)
+    client.start()
+    await wait_for(lambda: client.connected)
+    with caplog.at_level(logging.WARNING):
+        await pbx.send("IC 0001 10:00 001 00:01:00 103 0491570156\n")
+        await wait_for(lambda: "Error handling an SMDR line" in caplog.text)
+    assert "0491570156" not in caplog.text
+    await client.stop()
