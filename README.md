@@ -2,7 +2,9 @@
 
 [![PyPI](https://img.shields.io/pypi/v/aionecpbx?style=for-the-badge&color=FFFFFF&labelColor=000000)](https://pypi.org/project/aionecpbx/)
 [![Checks](https://img.shields.io/github/actions/workflow/status/olliemaller/aionecpbx/ci.yml?branch=main&style=for-the-badge&label=checks&labelColor=000000)](https://github.com/olliemaller/aionecpbx/actions/workflows/ci.yml)
-[![Licence](https://img.shields.io/github/license/olliemaller/aionecpbx?style=for-the-badge&color=FFFFFF&labelColor=000000)](https://github.com/olliemaller/aionecpbx/blob/main/LICENSE)
+[![Licence](https://img.shields.io/badge/licence-MIT-FFFFFF?style=for-the-badge&labelColor=000000)](https://github.com/olliemaller/aionecpbx/blob/main/LICENSE)
+[![Read the write-up](https://img.shields.io/badge/Read-the%20write--up-FFFFFF?style=for-the-badge&labelColor=000000)](https://maller.com.au/projects/nec-pbx/)
+[![maller.com.au](https://img.shields.io/badge/Site-maller.com.au-FFFFFF?style=for-the-badge&labelColor=000000)](https://maller.com.au/)
 
 Async Python clients for **NEC SL2100 and SV9100** phone systems, and for live calls through **FreePBX**.
 
